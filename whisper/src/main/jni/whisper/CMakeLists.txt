@@ -17,6 +17,7 @@ add_subdirectory(${WHISPER_ROOT}/../ggml ${CMAKE_CURRENT_BINARY_DIR}/ggml-build 
 add_library(sigyi_whisper SHARED
     whisper.cpp
     whisper_jni.cpp
+    aneforge/whisper-aneforge.cpp
 )
 
 target_include_directories(sigyi_whisper PRIVATE
