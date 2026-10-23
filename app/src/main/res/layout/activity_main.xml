@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="@color/sigyi_background"
@@ -374,7 +375,9 @@
             android:textColor="@color/sigyi_text_secondary"
             android:textSize="13sp" />
 
+        <!-- WebView is intentionally kept tiny and hidden for off-screen WASM rendering. -->
         <WebView
+            tools:ignore="WebViewLayout"
             android:id="@+id/wasmWebView"
             android:layout_width="1dp"
             android:layout_height="1dp"
