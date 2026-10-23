@@ -11,7 +11,7 @@ permissions:
 
 concurrency:
   group: sigyi-apk-build-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 env:
   GRADLE_VERSION: "8.11.1"
