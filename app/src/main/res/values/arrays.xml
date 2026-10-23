@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string-array name="gemini_models">
+        <item>Gemini Flash • Fast recap</item>
+        <item>Gemini Flash • Detailed recap</item>
+    </string-array>
+    <string-array name="myanmar_voices">
+        <item>Myanmar Female • Nilar</item>
+        <item>Myanmar Male • Thiha</item>
+    </string-array>
+</resources>

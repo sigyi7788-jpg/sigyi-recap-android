@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="sigyi_background">#0C0B12</color>
+    <color name="sigyi_surface">#171521</color>
+    <color name="sigyi_surface_raised">#211D30</color>
+    <color name="sigyi_accent">#B99CFF</color>
+    <color name="sigyi_lavender">#D6C5FF</color>
+    <color name="sigyi_text_primary">#F8F5FF</color>
+    <color name="sigyi_text_secondary">#B0AABD</color>
+    <color name="sigyi_text_muted">#756F83</color>
+    <color name="sigyi_success">#6FE0B0</color>
+    <color name="white">#FFFFFF</color>
+</resources>

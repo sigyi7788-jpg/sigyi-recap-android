@@ -1,0 +1,188 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>SIGYI FFmpeg Engine</title></head>
+<body>
+<script src="https://unpkg.com/@ffmpeg/ffmpeg@0.12.10/dist/umd/ffmpeg.js"></script>
+<script src="https://unpkg.com/@ffmpeg/util@0.12.1/dist/umd/index.js"></script>
+<script>
+(() => {
+  const CHUNK_SIZE = 512 * 1024;
+  const OUTPUT_CHUNK_SIZE = 512 * 1024;
+  let ffmpeg = null;
+  let loading = false;
+
+  function nativeCall(name, ...args) {
+    if (window.SigyiNative && typeof window.SigyiNative[name] === 'function') {
+      window.SigyiNative[name](...args);
+    }
+  }
+
+  function base64ToBytes(value) {
+    const binary = atob(value || '');
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    return bytes;
+  }
+
+  function bytesToBase64(bytes) {
+    let binary = '';
+    for (let i = 0; i < bytes.length; i += 0x8000) {
+      binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+    }
+    return btoa(binary);
+  }
+
+  async function writeNativeFile(name, size, readChunk) {
+    // Allocate only one merged input buffer; avoid retaining every chunk and then
+    // allocating a second full-size buffer (a major mobile WebView OOM trigger).
+    const merged = new Uint8Array(size);
+    for (let offset = 0; offset < size; offset += CHUNK_SIZE) {
+      const length = Math.min(CHUNK_SIZE, size - offset);
+      const bytes = base64ToBytes(readChunk(offset, length));
+      if (bytes.length !== length) throw new Error(name + ' chunk မပြည့်ပါ။');
+      merged.set(bytes, offset);
+      nativeCall('onProgress', Math.min(4, Math.round(((offset + length) / size) * 4)));
+    }
+    await ffmpeg.writeFile(name, merged);
+  }
+
+  window.sigyiLoadEngine = async function () {
+    if (ffmpeg || loading) return;
+    loading = true;
+    try {
+      const F = window.FFmpegWASM && window.FFmpegWASM.FFmpeg;
+      const U = window.FFmpegUtil;
+      if (!F || !U) throw new Error('FFmpeg.wasm library မရပါ။ Internet connection စစ်ပါ။');
+      ffmpeg = new F();
+      ffmpeg.on('progress', ({progress}) => nativeCall('onProgress', Math.max(0, Math.min(99, Math.round(progress * 100)))));
+      const base = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd';
+      await ffmpeg.load({
+        coreURL: await U.toBlobURL(base + '/ffmpeg-core.js', 'text/javascript'),
+        wasmURL: await U.toBlobURL(base + '/ffmpeg-core.wasm', 'application/wasm')
+      });
+      nativeCall('onEngineReady');
+    } catch (e) {
+      nativeCall('onError', String(e && e.message ? e.message : e));
+    } finally {
+      loading = false;
+    }
+  };
+
+  function srtTime(ms) {
+    const total = Math.max(0, Math.round(Number(ms) || 0));
+    const h = Math.floor(total / 3600000);
+    const m = Math.floor((total % 3600000) / 60000);
+    const s = Math.floor((total % 60000) / 1000);
+    const x = total % 1000;
+    return String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0') + ':' +
+      String(s).padStart(2, '0') + ',' + String(x).padStart(3, '0');
+  }
+
+  function wordsOf(text) {
+    try {
+      if (window.Intl && Intl.Segmenter) {
+        const segmenter = new Intl.Segmenter('my', { granularity: 'word' });
+        const words = Array.from(segmenter.segment(text))
+          .map(item => item.segment.trim()).filter(Boolean);
+        if (words.length) return words;
+      }
+    } catch (_) {}
+    return String(text || '').trim().split(/\s+/).filter(Boolean);
+  }
+
+  window.sigyiRender = async function (subtitleJson, optionsJson, audioCount) {
+    try {
+      if (!ffmpeg) throw new Error('FFmpeg.wasm engine မ ready သေးပါ။');
+      const subtitleList = JSON.parse(subtitleJson || '[]');
+      const options = JSON.parse(optionsJson || '{}');
+      const includeSubtitles = options.include_subtitles !== false;
+      const count = Number(audioCount) || 0;
+      if (!count) throw new Error('Narration audio segment မရှိပါ။');
+
+      const videoSize = Number(window.SigyiNative.getVideoSize());
+      if (!videoSize) throw new Error('Input video file မရှိပါ။');
+      await writeNativeFile('input.mp4', videoSize,
+        (offset, length) => window.SigyiNative.readVideoChunk(offset, length));
+
+      for (let i = 0; i < count; i++) {
+        const audioSize = Number(window.SigyiNative.getAudioSize(i));
+        if (!audioSize) throw new Error('Audio segment ' + i + ' မရှိပါ။');
+        await writeNativeFile('audio' + i + '.wav', audioSize,
+          (offset, length) => window.SigyiNative.readAudioChunk(i, offset, length));
+      }
+
+      let subtitleNumber = 1;
+      const srtParts = [];
+      subtitleList.forEach(item => {
+        const exactWords = Array.isArray(item.words) && item.words.length ? item.words : null;
+        if (exactWords) {
+          exactWords.forEach(word => {
+            srtParts.push(subtitleNumber++ + '\n' + srtTime(word.start_ms) + ' --> ' +
+              srtTime(word.end_ms) + '\n' + String(word.text || '').trim() + '\n');
+          });
+          return;
+        }
+        const words = wordsOf(String(item.text || '').replace(/[\r\n]+/g, ' '));
+        const start = Number(item.start_ms) || 0;
+        const end = Math.max(start + 1, Number(item.end_ms) || start + 1);
+        const step = (end - start) / Math.max(1, words.length);
+        words.forEach((word, index) => {
+          const wordStart = Math.round(start + step * index);
+          const wordEnd = Math.round(index === words.length - 1 ? end : start + step * (index + 1));
+          srtParts.push(subtitleNumber++ + '\n' + srtTime(wordStart) + ' --> ' +
+            srtTime(wordEnd) + '\n' + word + '\n');
+        });
+      });
+      if (includeSubtitles) {
+        await ffmpeg.writeFile('subtitle.srt', new TextEncoder().encode(srtParts.join('\n')));
+      }
+
+      const audioInputs = [];
+      const audioLabels = [];
+      for (let i = 0; i < count; i++) {
+        audioInputs.push('-i', 'audio' + i + '.wav');
+        audioLabels.push('[' + (i + 1) + ':a]');
+      }
+      const narrationFilter = audioLabels.join('') + 'concat=n=' + count + ':v=0:a=1[narration]';
+
+      // Intentionally map narration only: original movie audio is muted completely.
+      const command = [
+        '-i', 'input.mp4', ...audioInputs,
+        '-filter_complex', narrationFilter,
+        '-map', '0:v:0',
+        '-map', '[narration]',
+        '-map_metadata', '-1',
+        '-map_chapters', '-1'
+      ];
+      if (includeSubtitles) command.push('-vf', 'subtitles=subtitle.srt');
+      command.push(
+        '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '18',
+        '-fps_mode', 'passthrough',
+        '-c:a', 'aac', '-b:a', '192k', '-ar', '48000', '-shortest', '-movflags', '+faststart',
+        'output.mp4'
+      );
+      await ffmpeg.exec(command);
+
+      const output = await ffmpeg.readFile('output.mp4');
+      const totalChunks = Math.ceil(output.length / OUTPUT_CHUNK_SIZE);
+      nativeCall('onOutputStart', totalChunks);
+      for (let offset = 0, index = 0; offset < output.length; offset += OUTPUT_CHUNK_SIZE, index++) {
+        const bytes = output.subarray(offset, Math.min(output.length, offset + OUTPUT_CHUNK_SIZE));
+        nativeCall('onOutputChunk', index, totalChunks, bytesToBase64(bytes));
+      }
+      nativeCall('onOutputComplete');
+
+      await Promise.allSettled([
+        ffmpeg.deleteFile('input.mp4'),
+        includeSubtitles ? ffmpeg.deleteFile('subtitle.srt') : Promise.resolve(),
+        ffmpeg.deleteFile('output.mp4'),
+        ...Array.from({ length: count }, (_, i) => ffmpeg.deleteFile('audio' + i + '.wav'))
+      ]);
+    } catch (e) {
+      nativeCall('onError', String(e && e.message ? e.message : e));
+    }
+  };
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,7 @@
+services:
+  - type: web
+    name: sigyi-edge-tts
+    runtime: docker
+    dockerfilePath: ./edge-tts-server/Dockerfile
+    dockerContext: .
+    healthCheckPath: /health
